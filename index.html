@@ -245,6 +245,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold); box-shadow:0 0
 .doc{
   width:794px; min-height:1123px; background:#fff; margin:0 auto; color:#1c1c1c;
   font-family:var(--serif); position:relative; box-shadow:0 6px 24px rgba(0,0,0,.14);
+  -webkit-print-color-adjust:exact; print-color-adjust:exact;
 }
 .doc *{box-sizing:border-box}
 .doc .pad{padding:46px 50px}
@@ -272,10 +273,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold); box-shadow:0 0
 
 @media print{
   @page{size:A4; margin:0}
-  body{background:#fff}
+  html,body{background:#fff !important; margin:0; padding:0; height:auto; overflow:visible}
   #app,.tabbar,.actionbar,.topbar,.toast,.overlay{display:none !important}
   #printArea{display:block !important}
-  .doc{box-shadow:none; margin:0; width:100%; min-height:auto}
+  .doc{box-shadow:none; margin:0; width:100%; min-height:auto; -webkit-print-color-adjust:exact; print-color-adjust:exact}
   .doc .paidmark,.doc .voidmark{opacity:1}
 }
 </style>
@@ -1653,10 +1654,19 @@ function docFileName(doc,type){
 }
 function printDoc(){
   const {doc,type}=getDoc();
-  $('#printArea').innerHTML=`<div class="doc ${doc.templateId}">${renderTemplate(doc,type)}</div>`;
+  if(!doc){ toast('Nothing to print'); return; }
+  const pa=$('#printArea');
+  pa.innerHTML=`<div class="doc ${doc.templateId}">${renderTemplate(doc,type)}</div>`;
   S._prevTitle=document.title;
   document.title=docFileName(doc,type);
-  window.print();
+  // Wait for the logo/images to finish loading, then two paint frames, THEN print.
+  // On phones the print snapshot can fire before the document has drawn, producing a blank PDF.
+  const imgs=Array.from(pa.querySelectorAll('img'));
+  const ready=Promise.all(imgs.map(img=> (img.complete && img.naturalWidth>0)
+    ? Promise.resolve()
+    : new Promise(res=>{ img.addEventListener('load',res,{once:true}); img.addEventListener('error',res,{once:true}); setTimeout(res,1500); })));
+  ready.then(()=> new Promise(r=> requestAnimationFrame(()=> requestAnimationFrame(r))))
+       .then(()=> setTimeout(()=>{ window.print(); }, 60));
 }
 window.addEventListener('afterprint',()=>{ $('#printArea').innerHTML=''; if(S._prevTitle!=null){ document.title=S._prevTitle; S._prevTitle=null; } });
 function summaryText(){
