@@ -12,6 +12,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<script src="html2canvas.min.js"></script>
+<script src="jspdf.umd.min.js"></script>
 <style>
 :root{
   --orange:#F26A21; --orange-d:#D9531A; --gold:#FBA919; --gold-l:#FDC24A;
@@ -1619,12 +1621,13 @@ function docViewHTML(){
     <button class="btn ghost sm" data-action="edit">${IC.edit} Edit</button></div>
   <div class="filters" style="margin-bottom:12px">${TEMPLATES.map(t=>`<button class="chip ${doc.templateId===t.id?'active':''}" data-tpl="${t.id}">${t.name}</button>`).join('')}</div>
   <div class="paper-scroll" id="paperWrap"><div class="doc ${doc.templateId}" id="theDoc">${renderTemplate(doc,type)}</div></div>
-  <div class="hint" style="margin:12px 2px">Tip: “Print / Save PDF” opens your phone’s print dialog — choose <b>Save as PDF</b>, then share that file on WhatsApp. The WhatsApp button below sends a text summary.</div>
+  <div class="hint" style="margin:12px 2px">“Save PDF” builds the document and downloads it straight to your phone — no print dialog. Find it in your <b>Downloads</b>, then share on WhatsApp. (“Print” is a fallback if you prefer the system dialog.)</div>
   <div style="height:80px"></div>
   <div class="actionbar" style="flex-wrap:wrap">
-    <button class="btn primary" data-action="print" style="flex:2">${IC.print} Print / Save PDF</button>
+    <button class="btn primary" data-action="savepdf" style="flex:2">${IC.download} Save PDF</button>
     <button class="btn ghost" data-action="wa" style="flex:1">${IC.wa} WhatsApp</button>
     <button class="btn ghost" data-action="copy" style="flex:1">${IC.copy}</button>
+    <button class="btn ghost" data-action="print" style="flex:1">${IC.print} Print</button>
   </div>`;
 }
 function bindDocView(){
@@ -1632,6 +1635,7 @@ function bindDocView(){
   $('[data-action="back"]').addEventListener('click',()=> nav(type==='quote'?'quotations':'receipts'));
   $('[data-action="edit"]').addEventListener('click',()=> type==='quote'?openQuotation(doc.id):openReceipt(doc.id));
   $$('#view [data-tpl]').forEach(b=> b.addEventListener('click',()=>{ doc.templateId=b.dataset.tpl; save(); render(); }));
+  $('[data-action="savepdf"]').addEventListener('click',()=> savePdf());
   $('[data-action="print"]').addEventListener('click',()=> printDoc());
   $('[data-action="wa"]').addEventListener('click',()=> shareWA());
   $('[data-action="copy"]').addEventListener('click',()=> copySummary());
@@ -1651,6 +1655,53 @@ function docFileName(doc,type){
   const name=((doc.customerSnapshot&&doc.customerSnapshot.name)||'Client').trim();
   const numb=(doc.number||docTitle(type)).trim();
   return (name+' - '+numb).replace(/[\/\\:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
+}
+async function savePdf(){
+  const {doc,type}=getDoc();
+  if(!doc){ toast('Nothing to save'); return; }
+  // Libraries must be present (bundled). Fall back to print if somehow missing.
+  const hasLibs = (typeof html2canvas!=='undefined') && window.jspdf && window.jspdf.jsPDF;
+  if(!hasLibs){ toast('PDF engine unavailable — using print'); printDoc(); return; }
+  const btn=$('[data-action="savepdf"]'); const label=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='Building PDF…'; }
+  // Render the document off-screen at full A4 pixel width (visible so html2canvas can measure it).
+  const holder=document.createElement('div');
+  holder.style.cssText='position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1';
+  holder.innerHTML=`<div class="doc ${doc.templateId}">${renderTemplate(doc,type)}</div>`;
+  document.body.appendChild(holder);
+  const node=holder.firstElementChild;
+  try{
+    // wait for the logo/images to be ready
+    await Promise.all(Array.from(node.querySelectorAll('img')).map(img=>
+      (img.complete && img.naturalWidth>0) ? Promise.resolve()
+      : new Promise(res=>{ img.addEventListener('load',res,{once:true}); img.addEventListener('error',res,{once:true}); setTimeout(res,2000); })));
+    await new Promise(r=> requestAnimationFrame(()=> requestAnimationFrame(r)));
+    const canvas=await html2canvas(node,{ scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false, windowWidth:794, width:794 });
+    const { jsPDF }=window.jspdf;
+    const pdf=new jsPDF('p','pt','a4');
+    const pageW=pdf.internal.pageSize.getWidth();
+    const pageH=pdf.internal.pageSize.getHeight();
+    const imgW=pageW;
+    const imgH=canvas.height * (pageW / canvas.width);
+    const imgData=canvas.toDataURL('image/jpeg', 0.92);
+    let heightLeft=imgH, position=0;
+    pdf.addImage(imgData,'JPEG',0,position,imgW,imgH,'','FAST');
+    heightLeft-=pageH;
+    while(heightLeft>0){
+      position-=pageH;
+      pdf.addPage();
+      pdf.addImage(imgData,'JPEG',0,position,imgW,imgH,'','FAST');
+      heightLeft-=pageH;
+    }
+    pdf.save(docFileName(doc,type)+'.pdf');
+    toast('PDF saved to Downloads');
+  }catch(e){
+    console.error('savePdf failed', e);
+    toast('Could not build PDF — try Print');
+  }finally{
+    holder.remove();
+    if(btn){ btn.disabled=false; btn.innerHTML=label; }
+  }
 }
 function printDoc(){
   const {doc,type}=getDoc();

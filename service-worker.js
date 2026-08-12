@@ -2,12 +2,14 @@
    Caches the app shell so it opens with no internet after the first visit.
    IMPORTANT: when you upload a NEW version of the app, change the number
    in CACHE below (e.g. v1 -> v2). That tells phones to fetch the new files. */
-const CACHE = 'squisito-v2';
+const CACHE = 'squisito-v3';
 
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './html2canvas.min.js',
+  './jspdf.umd.min.js',
   './icon-192.png',
   './icon-512.png',
   './maskable-192.png',
